@@ -1,150 +1,128 @@
-# Helmet Detection For Traffic Safety (Terminal Only)
+# Helmet Detection System (YOLO + CNN)
 
-## Problem Statement
-Road safety systems need a reliable way to detect whether a rider is wearing a helmet in real time.
-Manual monitoring is difficult, error-prone, and not scalable across continuous camera feeds.
+Production-ready traffic helmet detection pipeline:
 
-This project solves a 3-class classification problem from camera frames:
+1. YOLO detects person bounding boxes.
+2. Each person crop is passed to a MobileNetV3 classifier.
+3. Classifier predicts only `helmet` or `no_helmet`.
+4. Green box for helmet, red box for no helmet.
 
-- `no_person`: no rider/person present in the frame
-- `no_helmet`: rider/person present but no helmet
-- `helmet`: rider/person present with helmet
+## Required Dataset Layout (Strict)
 
-## Solution Implemented
-We built a complete terminal-based ML workflow:
+```text
+data/
+|-- train/
+|   |-- helmet/
+|   `-- no_helmet/
+|-- val/
+|   |-- helmet/
+|   `-- no_helmet/
+`-- test/
+    |-- helmet/
+    `-- no_helmet/
+```
 
-1. Train a deep learning classifier on your dataset using GPU (CUDA) if available.
-2. Save the trained model in the `models` folder.
-3. Run a root-level realtime inference command (`main.py`) that reads webcam frames and prints live decisions in terminal.
 
-### Realtime Inference Output
-When running `main.py`, the system prints:
+## Model And Training Strategy
 
-- `[INFO] No person detected ...`
-- `[ALERT] Person detected without helmet ...`
-- `[SAFE] Person detected with helmet ...`
+- Backbone: MobileNetV3-Small (ImageNet pretrained)
+- Head: dropout 0.3 + binary classifier
+- Training stages:
+  - Stage 1: freeze backbone, train classifier head
+  - Stage 2: unfreeze all layers, fine-tune end-to-end
+- Optimizer: Adam
+- Scheduler: ReduceLROnPlateau
+- Augmentations: RandomResizedCrop, rotation, ColorJitter, horizontal flip
 
-## Why This Is Effective
-
-1. Real-time monitoring: works continuously on webcam feed.
-2. Practical class design: directly models operational outcomes (`no_person`, `no_helmet`, `helmet`).
-3. Fast inference: lightweight backbone supports near real-time behavior.
-4. GPU acceleration: training uses CUDA on NVIDIA GPU (GTX 1650 in this setup).
-5. Fully terminal-driven: simple commands for training, testing, and deployment-like runtime.
-
-## Model Used
-
-- Architecture: `MobileNetV3-Small` (transfer learning using `torchvision.models`)
-- Task: 3-class image classification
-- Training details:
-  - Cross entropy loss
-  - Adam optimizer
-  - Standard image normalization
-  - Data augmentation (flip, rotation, color jitter)
-
-Saved model artifacts:
-
-- `models/helmet_classifier.pth`
-- `models/helmet_classifier_labels.json`
-
-## Libraries Used
-
-- `torch` and `torchvision`: model training and inference
-- `opencv-python`: webcam capture for realtime predictions
-- `numpy`: numerical operations
-- `Pillow`: image backend used by torchvision transforms
-
-See pinned versions in `requirements.txt`.
-
-## Project Directory Structure
+## Project Structure
 
 ```text
 Helmet-detection/
 |-- data/
-|   |-- Helmet/
-|   |-- Person_no_helmet/
-|   `-- no_person/
 |-- models/
-|   |-- helmet_model_cli.py
-|   |-- helmet_classifier.pth
-|   `-- helmet_classifier_labels.json
+|   |-- helmet_model.py
+|   `-- yolo_pipeline.py
+|-- scripts/
+|   |-- train.py
+|   |-- test.py
+|   `-- run_camera.py
 |-- main.py
 |-- requirements.txt
 `-- README.md
 ```
 
-## Clone And Run
-
-### 1. Clone Repository
+## Install
 
 ```bash
-git clone https://github.com/Vansh-kash2023/Helmet-detection.git
-cd Helmet-detection
-```
-
-### 2. Create And Activate Virtual Environment
-
-```powershell
 python -m venv .venv
 .venv\Scripts\activate
-```
-
-### 3. Install Dependencies
-
-```bash
 pip install -r requirements.txt
 ```
 
-### 4. Train Model (Optional)
+## Simple Usage (Recommended)
+
+Train and save model: (Optional)
 
 ```bash
-python models/helmet_model_cli.py train --data-root data --epochs 12 --batch-size 32 --checkpoint models/helmet_classifier.pth --labels models/helmet_classifier_labels.json
+python main.py train --data-root data --checkpoint models/helmet_classifier.pth
 ```
 
-### 5. Evaluate Model (Optional)
+Run realtime detection:
 
 ```bash
-python models/helmet_model_cli.py test --data-root data --checkpoint models/helmet_classifier.pth --batch-size 32
+python main.py run --checkpoint models/helmet_classifier.pth --camera-id 0
 ```
 
-### 6. Run Realtime Webcam Prediction
+## Optional Advanced Commands
+
+Train with custom settings:
 
 ```bash
-python main.py --checkpoint models/helmet_classifier.pth --camera-id 0
+python scripts/train.py --data-root data --checkpoint models/helmet_classifier.pth --head-epochs 5 --fine-tune-epochs 3
 ```
 
-Stop runtime with `Ctrl+C`.
+If you want to skip fine-tuning completely:
 
-Optional runtime flags:
+```bash
+python scripts/train.py --data-root data --checkpoint models/helmet_classifier.pth --head-epochs 5 --fine-tune-epochs 0
+```
 
-- `--threshold 0.55`
-- `--log-interval 1.0`
-- `--frame-stride 2`
+## Test
 
-What each flag means:
+```bash
+python scripts/test.py --data-root data --checkpoint models/helmet_classifier.pth
+```
 
-- `--threshold 0.55`: Minimum confidence required to trust a prediction. If model confidence is below this value, output is shown as uncertain.
-- `--log-interval 1.0`: Prevents repeated logs from printing too frequently. For the same class, logs are throttled to roughly once every 1 second.
-- `--frame-stride 2`: Runs inference on every 2nd frame instead of every frame, reducing GPU/CPU usage and improving runtime smoothness.
+## Run Camera Pipeline
 
-Typical tuning guidance:
+Main entrypoint:
 
-- Increase `--threshold` to reduce false positives.
-- Decrease `--threshold` if you are missing true detections.
-- Increase `--frame-stride` on slower machines.
-- Decrease `--frame-stride` for faster, more responsive detection.
+```bash
+python main.py run --checkpoint models/helmet_classifier.pth --camera-id 0 --person-conf 0.35 --helmet-conf 0.55 --frame-stride 2
+```
 
-## Dataset Used
+Script entrypoint:
 
-This project uses the helmet dataset from Kaggle:
+```bash
+python scripts/run_camera.py --checkpoint models/helmet_classifier.pth --camera-id 0 --person-conf 0.35 --helmet-conf 0.55 --frame-stride 2
+```
 
-- https://www.kaggle.com/datasets/andrewmvd/helmet-detection
+Useful options:
 
-For this implementation, data is organized into 3 class folders used by the classifier:
+- `--yolo-weights yolov8n.pt`
+- `--save-output --output-path outputs/camera_output.mp4`
+- `--no-show`
+- `--force-cpu`
 
-- `Helmet`
-- `Person_no_helmet`
-- `no_person`
+## Libraries Used
+
+- torch
+- torchvision
+- ultralytics
+- opencv-python
+- numpy
+- Pillow
+- scikit-learn
 
 ## Author
 Vansh Kashyap
